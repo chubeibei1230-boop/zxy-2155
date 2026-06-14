@@ -53,7 +53,13 @@ const routes = [
         path: 'anomalies',
         name: 'Anomalies',
         component: () => import('@/views/Anomalies.vue'),
-        meta: { title: '异常记录', icon: 'Warning', roles: ['admin', 'auditor'] }
+        meta: { title: '异常闭环管理', icon: 'Warning', roles: ['admin', 'auditor'] }
+      },
+      {
+        path: 'anomalies/:id',
+        name: 'AnomalyDetail',
+        component: () => import('@/views/AnomalyDetail.vue'),
+        meta: { title: '异常详情', hidden: true, roles: ['admin', 'auditor'] }
       },
       {
         path: 'areas',

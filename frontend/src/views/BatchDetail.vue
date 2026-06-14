@@ -23,11 +23,38 @@
             <el-descriptions-item label="超时阈值">{{ batch?.cleaning_timeout_hours }} 小时</el-descriptions-item>
             <el-descriptions-item label="开始时间">{{ batch?.started_at }}</el-descriptions-item>
             <el-descriptions-item label="完成时间">{{ batch?.completed_at || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="关联操作记录">{{ records.length }} 条</el-descriptions-item>
           </el-descriptions>
         </div>
       </el-col>
       <el-col :span="16">
         <div class="table-card" style="min-height:260px;">
+          <div class="page-header" style="margin-bottom:12px;">
+            <h3 style="margin:0;">批次异常闭环概况</h3>
+          </div>
+          <div class="anomaly-summary">
+            <div class="summary-item" style="border-left:4px solid #909399;background:#f4f4f5;">
+              <div class="summary-label">异常总数</div>
+              <div class="summary-value" style="color:#909399;">{{ anomalies.length }}</div>
+            </div>
+            <div class="summary-item" style="cursor:pointer;border-left:4px solid #f56c6c;background:#fef0f0;" @click="filterAnomalies('unresolved')">
+              <div class="summary-label">未处理</div>
+              <div class="summary-value" style="color:#f56c6c;">{{ unresolvedCount }}</div>
+            </div>
+            <div class="summary-item" style="cursor:pointer;border-left:4px solid #e6a23c;background:#fdf6ec;" @click="filterAnomalies('following')">
+              <div class="summary-label">跟进中</div>
+              <div class="summary-value" style="color:#e6a23c;">{{ followingCount }}</div>
+            </div>
+            <div class="summary-item" style="cursor:pointer;border-left:4px solid #dc2626;background:#fef2f2;" @click="filterAnomalies('overdue')">
+              <div class="summary-label">已逾期</div>
+              <div class="summary-value" style="color:#dc2626;">{{ overdueCount }}</div>
+            </div>
+            <div class="summary-item" style="cursor:pointer;border-left:4px solid #67c23a;background:#f0f9eb;" @click="filterAnomalies('completed')">
+              <div class="summary-label">已闭环</div>
+              <div class="summary-value" style="color:#67c23a;">{{ completedCount }}</div>
+            </div>
+          </div>
+          <el-divider style="margin:16px 0;" />
           <h3 style="margin-top:0;">操作时间线</h3>
           <el-timeline v-if="timeline && timeline.length > 0">
             <el-timeline-item
@@ -84,14 +111,16 @@
 
     <div class="table-card" style="margin-top:16px;" v-if="anomalies.length > 0">
       <div class="page-header" style="margin-bottom:12px;">
-        <h3 style="margin:0;">批次关联异常（{{ anomalies.length }}）</h3>
+        <h3 style="margin:0;">批次关联异常闭环追踪（{{ anomalies.length }}）</h3>
         <div>
-          <el-tag type="danger" size="small">{{ anomalies.filter(a => !a.resolved).length }} 未处理</el-tag>
-          <el-tag type="warning" size="small" style="margin-left:8px;">{{ anomalies.filter(a => a.review_cause && !a.review_done).length }} 跟进中</el-tag>
-          <el-tag type="success" size="small" style="margin-left:8px;">{{ anomalies.filter(a => a.review_done).length }} 已完成</el-tag>
+          <el-tag type="danger" size="small">{{ unresolvedCount }} 未处理</el-tag>
+          <el-tag type="warning" size="small" style="margin-left:8px;">{{ followingCount }} 跟进中</el-tag>
+          <el-tag type="danger" size="small" style="margin-left:8px;" effect="plain">{{ overdueCount }} 已逾期</el-tag>
+          <el-tag type="success" size="small" style="margin-left:8px;">{{ completedCount }} 已闭环</el-tag>
+          <el-button type="primary" link size="small" style="margin-left:12px;" @click="goAllAnomalies">查看批次全部异常</el-button>
         </div>
       </div>
-      <el-table :data="anomalies" stripe border size="small">
+      <el-table :data="anomalies" stripe border size="small" @row-click="goAnomalyDetail">
         <el-table-column prop="created_at" label="异常时间" width="170" />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
@@ -110,16 +139,17 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="复盘状态" width="100">
+        <el-table-column label="闭环状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" v-if="row.review_done" type="success">跟进完成</el-tag>
+            <el-tag size="small" v-else-if="row.review_cause && !row.review_done && isOverdue(row.follow_up_due_date)" type="danger">已逾期</el-tag>
             <el-tag size="small" v-else-if="row.review_cause" type="warning">跟进中</el-tag>
             <el-tag size="small" v-else type="info">未复盘</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="review_cause" label="异常原因" min-width="140" show-overflow-tooltip />
         <el-table-column prop="review_link" label="责任环节" width="110" show-overflow-tooltip />
-        <el-table-column prop="follow_up_user_name" label="跟进人" width="90" />
+        <el-table-column prop="follow_up_user_name" label="责任人" width="90" />
         <el-table-column label="截止时间" width="110">
           <template #default="{ row }">
             <span v-if="row.follow_up_due_date" :class="{ 'overdue': !row.review_done && isOverdue(row.follow_up_due_date) }">
@@ -129,6 +159,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="review_done_remark" label="跟进说明" min-width="120" show-overflow-tooltip />
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click.stop="goAnomalyDetail(row)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
   </div>
@@ -136,11 +171,12 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 
 const route = useRoute()
+const router = useRouter()
 const batch = ref(null)
 const records = ref([])
 const timeline = ref([])
@@ -160,6 +196,11 @@ const filteredRecords = computed(() => {
   return records.value.filter(r => r.operation_type === filters.operation_type)
 })
 
+const unresolvedCount = computed(() => anomalies.value.filter(a => !a.resolved).length)
+const followingCount = computed(() => anomalies.value.filter(a => a.review_cause && !a.review_done).length)
+const overdueCount = computed(() => anomalies.value.filter(a => a.review_cause && !a.review_done && isOverdue(a.follow_up_due_date)).length)
+const completedCount = computed(() => anomalies.value.filter(a => a.review_done).length)
+
 function filterRecords() {
 }
 
@@ -176,6 +217,25 @@ function isOverdue(dateStr) {
   return due < now
 }
 
+function filterAnomalies(type) {
+  const query = { batch_id: route.params.id }
+  if (type === 'unresolved') query.resolved = 0
+  if (type === 'following') query.review_done = 'pending'
+  if (type === 'overdue') query.review_done = 'overdue'
+  if (type === 'completed') query.review_done = 1
+  router.push({ path: '/anomalies', query })
+}
+
+function goAllAnomalies() {
+  router.push({ path: '/anomalies', query: { batch_id: route.params.id } })
+}
+
+function goAnomalyDetail(row) {
+  if (row && row.id) {
+    router.push(`/anomalies/${row.id}`)
+  }
+}
+
 async function loadData() {
   const res = await request.get(`/batches/${route.params.id}`)
   if (res.code === 200) {
@@ -190,8 +250,29 @@ onMounted(loadData)
 </script>
 
 <style scoped>
+.anomaly-summary {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+.summary-item {
+  padding: 14px 16px;
+  border-radius: 6px;
+}
+.summary-label {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 6px;
+}
+.summary-value {
+  font-size: 24px;
+  font-weight: 600;
+}
 .overdue {
   color: #f56c6c;
   font-weight: 600;
+}
+.el-table >>> tbody tr {
+  cursor: pointer;
 }
 </style>

@@ -21,9 +21,53 @@
         <div class="stat-value" style="color:#909399">{{ stats.anomaly || 0 }}</div>
         <div class="stat-label">异常留置</div>
       </div>
-      <div class="stat-card" style="cursor:pointer;" @click="goAnomalies">
-        <div class="stat-value" style="color:#e6a23c">{{ pendingFollowUpCount }}</div>
-        <div class="stat-label">待跟进异常</div>
+    </div>
+
+    <div class="stats-row" style="margin-bottom:16px;">
+      <div class="stat-card anomaly-card" style="cursor:pointer;border-left:4px solid #f56c6c;" @click="goAnomaliesByStatus('pending')">
+        <div class="anomaly-icon" style="background:#fef0f0;color:#f56c6c;">
+          <el-icon :size="22"><Clock /></el-icon>
+        </div>
+        <div class="anomaly-info">
+          <div class="stat-value" style="color:#f56c6c">{{ anomalyStats.pending || 0 }}</div>
+          <div class="stat-label">待处理异常</div>
+        </div>
+      </div>
+      <div class="stat-card anomaly-card" style="cursor:pointer;border-left:4px solid #e6a23c;" @click="goAnomaliesByStatus('following')">
+        <div class="anomaly-icon" style="background:#fdf6ec;color:#e6a23c;">
+          <el-icon :size="22"><Promotion /></el-icon>
+        </div>
+        <div class="anomaly-info">
+          <div class="stat-value" style="color:#e6a23c">{{ anomalyStats.following || 0 }}</div>
+          <div class="stat-label">跟进中异常</div>
+        </div>
+      </div>
+      <div class="stat-card anomaly-card" style="cursor:pointer;border-left:4px solid #dc2626;" @click="goAnomaliesByStatus('overdue')">
+        <div class="anomaly-icon" style="background:#fef2f2;color:#dc2626;">
+          <el-icon :size="22"><WarningFilled /></el-icon>
+        </div>
+        <div class="anomaly-info">
+          <div class="stat-value" style="color:#dc2626">{{ anomalyStats.overdue || 0 }}</div>
+          <div class="stat-label">已逾期异常</div>
+        </div>
+      </div>
+      <div class="stat-card anomaly-card" style="cursor:pointer;border-left:4px solid #67c23a;" @click="goAnomaliesByStatus('completed')">
+        <div class="anomaly-icon" style="background:#f0f9eb;color:#67c23a;">
+          <el-icon :size="22"><CircleCheckFilled /></el-icon>
+        </div>
+        <div class="anomaly-info">
+          <div class="stat-value" style="color:#67c23a">{{ anomalyStats.completed || 0 }}</div>
+          <div class="stat-label">已闭环异常</div>
+        </div>
+      </div>
+      <div class="stat-card anomaly-card" style="border-left:4px solid #909399;">
+        <div class="anomaly-icon" style="background:#f4f4f5;color:#909399;">
+          <el-icon :size="22"><DataBoard /></el-icon>
+        </div>
+        <div class="anomaly-info">
+          <div class="stat-value" style="color:#909399">{{ anomalyStats.total || 0 }}</div>
+          <div class="stat-label">异常总数</div>
+        </div>
       </div>
     </div>
 
@@ -67,21 +111,44 @@
     </el-row>
 
     <el-row :gutter="16" style="margin-bottom:16px;">
-      <el-col :span="10">
+      <el-col :span="12">
         <div class="table-card">
           <div class="page-header">
-            <h2>周转箱负载</h2>
+            <h2 style="color:#dc2626;">
+              <el-icon><WarningFilled /></el-icon>
+              <span style="margin-left:4px;">逾期异常提示</span>
+            </h2>
+            <el-button type="danger" link @click="goAnomaliesByStatus('overdue')" v-if="(dashboard.overdueAnomalies || []).length > 0">查看全部</el-button>
           </div>
-          <div ref="boxChartRef" style="width:100%;height:300px;"></div>
+          <el-table :data="dashboard.overdueAnomalies || []" stripe max-height="300" v-if="(dashboard.overdueAnomalies || []).length > 0" @row-click="goAnomalyDetail">
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.severity === 'high' ? 'danger' : 'warning'">{{ anomalyTypeMap[row.anomaly_type] }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="description" label="描述" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="follow_up_user_name" label="跟进人" width="80" />
+            <el-table-column label="截止时间" width="100">
+              <template #default="{ row }">
+                <span class="overdue">{{ row.follow_up_due_date }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="60">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click.stop="goAnomalyDetail(row)">详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无逾期异常" :image-size="60" />
         </div>
       </el-col>
-      <el-col :span="14">
+      <el-col :span="12">
         <div class="table-card" style="height:100%;">
           <div class="page-header">
             <h2>待复核列表</h2>
             <el-button type="primary" link @click="goOperation">去处理</el-button>
           </div>
-          <el-table :data="dashboard.pendingReviews || []" stripe max-height="340">
+          <el-table :data="dashboard.pendingReviews || []" stripe max-height="300">
             <el-table-column prop="code" label="座席垫编号" width="140" />
             <el-table-column label="区域">
               <template #default="{ row }">{{ row.area_code }} - {{ row.area_name }}</template>
@@ -105,9 +172,9 @@
         <div class="table-card" style="height:100%;">
           <div class="page-header">
             <h2>未完成跟进事项</h2>
-            <el-button type="warning" link @click="goAnomalies" v-if="userStore.isAuditor || userStore.isAdmin">查看全部</el-button>
+            <el-button type="warning" link @click="goAnomaliesByStatus('following')" v-if="(dashboard.pendingFollowUps || []).length > 0">查看全部</el-button>
           </div>
-          <el-table :data="dashboard.pendingFollowUps || []" stripe max-height="340" v-if="(dashboard.pendingFollowUps || []).length > 0">
+          <el-table :data="dashboard.pendingFollowUps || []" stripe max-height="340" v-if="(dashboard.pendingFollowUps || []).length > 0" @row-click="goAnomalyDetail">
             <el-table-column label="类型" width="80">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.severity === 'high' ? 'danger' : 'warning'">{{ anomalyTypeMap[row.anomaly_type] }}</el-tag>
@@ -122,6 +189,11 @@
                 </span>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="60">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click.stop="goAnomalyDetail(row)">详情</el-button>
+              </template>
+            </el-table-column>
           </el-table>
           <el-empty v-else description="暂无待跟进事项" :image-size="60" />
         </div>
@@ -134,6 +206,7 @@
 import { ref, reactive, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
+import { Clock, Promotion, WarningFilled, CircleCheckFilled, DataBoard } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import dayjs from 'dayjs'
@@ -143,10 +216,8 @@ const userStore = useUserStore()
 
 const dashboard = reactive({})
 const areaChartRef = ref()
-const boxChartRef = ref()
 const trendChartRef = ref()
 let areaChart = null
-let boxChart = null
 let trendChart = null
 
 const anomalyTypeMap = {
@@ -155,6 +226,10 @@ const anomalyTypeMap = {
   box_overload: '箱子过载',
   missing_review: '复核缺失'
 }
+
+const anomalyStats = computed(() => {
+  return dashboard.anomalyStats || { pending: 0, following: 0, overdue: 0, completed: 0, total: 0 }
+})
 
 const stats = computed(() => {
   const ss = dashboard.statusStats || []
@@ -168,14 +243,6 @@ const stats = computed(() => {
     anomaly: map['异常留置'] || 0
   }
 })
-
-const pendingFollowUpCount = computed(() => {
-  return (dashboard.pendingFollowUps || []).length
-})
-
-function formatTime(t) {
-  return dayjs(t).format('YYYY-MM-DD HH:mm')
-}
 
 function isOverdue(dateStr) {
   if (!dateStr) return false
@@ -191,8 +258,24 @@ function goBatchDetail(id) {
 function goOperation() {
   router.push('/operation')
 }
-function goAnomalies() {
-  router.push({ path: '/anomalies', query: { review_done: 'pending' } })
+function goAnomaliesByStatus(status) {
+  const query = {}
+  if (status === 'pending') {
+    query.resolved = 0
+    query.review_done = 0
+  } else if (status === 'following') {
+    query.review_done = 'pending'
+  } else if (status === 'overdue') {
+    query.review_done = 'overdue'
+  } else if (status === 'completed') {
+    query.review_done = 1
+  }
+  router.push({ path: '/anomalies', query })
+}
+function goAnomalyDetail(row) {
+  if (row && row.id) {
+    router.push(`/anomalies/${row.id}`)
+  }
 }
 
 function renderAreaChart() {
@@ -210,29 +293,6 @@ function renderAreaChart() {
       { name: '清洗中', type: 'bar', stack: 'total', data: data.map(d => d.cleaning || 0), itemStyle: { color: '#e6a23c' } },
       { name: '待复核', type: 'bar', stack: 'total', data: data.map(d => d.pending_review || 0), itemStyle: { color: '#f56c6c' } },
       { name: '异常', type: 'bar', stack: 'total', data: data.map(d => d.anomaly || 0), itemStyle: { color: '#9b59b6' } }
-    ]
-  })
-}
-
-function renderBoxChart() {
-  if (!boxChartRef.value) return
-  if (!boxChart) boxChart = echarts.init(boxChartRef.value)
-  const data = dashboard.boxStats || []
-  boxChart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 50, right: 30, top: 20, bottom: 30 },
-    xAxis: { type: 'value', max: val => Math.max(val.max, 10) },
-    yAxis: { type: 'category', data: data.map(d => d.code) },
-    series: [
-      {
-        name: '容量', type: 'bar', data: data.map(d => d.capacity),
-        itemStyle: { color: '#ebeef5' }, barWidth: 18
-      },
-      {
-        name: '已装载', type: 'bar', data: data.map(d => d.current_load || 0),
-        itemStyle: { color: '#409eff' }, barWidth: 18,
-        label: { show: true, position: 'right', formatter: p => `${p.value}/${data[p.dataIndex].capacity}` }
-      }
     ]
   })
 }
@@ -271,14 +331,12 @@ async function loadData() {
     Object.assign(dashboard, res.data)
     await nextTick()
     renderAreaChart()
-    renderBoxChart()
     renderTrendChart()
   }
 }
 
 function resize() {
   areaChart && areaChart.resize()
-  boxChart && boxChart.resize()
   trendChart && trendChart.resize()
 }
 
@@ -289,7 +347,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', resize)
   areaChart && areaChart.dispose()
-  boxChart && boxChart.dispose()
   trendChart && trendChart.dispose()
 })
 </script>
@@ -297,12 +354,36 @@ onUnmounted(() => {
 <style scoped>
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+.stats-row:first-child {
+  grid-template-columns: repeat(5, 1fr);
+}
+.anomaly-card {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+}
+.anomaly-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 14px;
+  flex-shrink: 0;
+}
+.anomaly-info {
+  flex: 1;
 }
 .overdue {
   color: #f56c6c;
   font-weight: 600;
+}
+.el-table >>> tbody tr {
+  cursor: pointer;
 }
 </style>

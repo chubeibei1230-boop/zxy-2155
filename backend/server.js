@@ -460,7 +460,7 @@ app.post('/api/operations', authMiddleware, roleMiddleware('user', 'admin'), asy
 
 // 异常记录
 app.get('/api/anomalies', authMiddleware, async (req, res) => {
-  const { resolved, anomaly_type, start_date, end_date, review_done, batch_id, area_id, operator_id } = req.query;
+  const { resolved, anomaly_type, start_date, end_date, review_done, batch_id, area_id, operator_id, follow_up_user_id } = req.query;
   let sql = `
     SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
       tb.code as box_code, u.name as resolved_name,
@@ -487,6 +487,8 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   if (review_done !== undefined && review_done !== '') {
     if (review_done === 'pending') {
       sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0';
+    } else if (review_done === 'overdue') {
+      sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0 AND ar.follow_up_due_date IS NOT NULL AND DATE(ar.follow_up_due_date) < DATE(\'now\')';
     } else if (review_done === '1' || review_done === true) {
       sql += ' AND ar.review_done = 1';
     } else if (review_done === '0' || review_done === false) {
@@ -496,9 +498,58 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   if (batch_id) { sql += ' AND ar.batch_id = ?'; params.push(batch_id); }
   if (area_id) { sql += ' AND ar.area_id = ?'; params.push(area_id); }
   if (operator_id) { sql += ' AND ar.operator_id = ?'; params.push(operator_id); }
+  if (follow_up_user_id) { sql += ' AND ar.follow_up_user_id = ?'; params.push(follow_up_user_id); }
   sql += ' ORDER BY ar.created_at DESC';
   const data = await all(sql, params);
   ok(res, data);
+});
+
+app.get('/api/anomalies/:id', authMiddleware, async (req, res) => {
+  const anomaly = await get(`
+    SELECT ar.*, sm.code as mat_code, a.name as area_name, a.code as area_code, cb.code as batch_code,
+      tb.code as box_code, u.name as resolved_name,
+      fu.name as follow_up_user_name, ru.name as reviewed_name, ou.name as operator_name
+    FROM anomaly_records ar
+    LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
+    LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
+    LEFT JOIN turnover_boxes tb ON ar.box_id = tb.id
+    LEFT JOIN users u ON ar.resolved_by = u.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    LEFT JOIN users ru ON ar.reviewed_by = ru.id
+    LEFT JOIN users ou ON ar.operator_id = ou.id
+    WHERE ar.id = ?
+  `, [req.params.id]);
+  if (!anomaly) return fail(res, '异常记录不存在', 404);
+
+  const handleRecords = [];
+  if (anomaly.resolved_at) {
+    handleRecords.push({
+      type: '处理',
+      operator_name: anomaly.resolved_name,
+      time: anomaly.resolved_at,
+      remark: anomaly.resolved_remark || '处理完成'
+    });
+  }
+  if (anomaly.reviewed_at) {
+    handleRecords.push({
+      type: '复盘归因',
+      operator_name: anomaly.reviewed_name,
+      time: anomaly.reviewed_at,
+      remark: `原因：${anomaly.review_cause || ''}；责任环节：${anomaly.review_link || '未标注'}`
+    });
+  }
+  if (anomaly.review_done_at) {
+    handleRecords.push({
+      type: '完成跟进',
+      operator_name: anomaly.reviewed_name,
+      time: anomaly.review_done_at,
+      remark: anomaly.review_done_remark || '跟进完成'
+    });
+  }
+  handleRecords.sort((a, b) => new Date(a.time) - new Date(b.time));
+
+  ok(res, { anomaly, handleRecords });
 });
 
 app.post('/api/anomalies/:id/resolve', authMiddleware, async (req, res) => {
@@ -618,9 +669,32 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
     ORDER BY date
   `);
 
+  const anomalyStats = await get(`
+    SELECT
+      SUM(CASE WHEN resolved = 0 AND review_cause IS NULL THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN review_cause IS NOT NULL AND review_done = 0 AND (follow_up_due_date IS NULL OR DATE(follow_up_due_date) >= DATE('now')) THEN 1 ELSE 0 END) as following,
+      SUM(CASE WHEN review_cause IS NOT NULL AND review_done = 0 AND follow_up_due_date IS NOT NULL AND DATE(follow_up_due_date) < DATE('now') THEN 1 ELSE 0 END) as overdue,
+      SUM(CASE WHEN review_done = 1 THEN 1 ELSE 0 END) as completed,
+      COUNT(*) as total
+    FROM anomaly_records
+  `);
+
+  const overdueAnomalies = await all(`
+    SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
+      fu.name as follow_up_user_name
+    FROM anomaly_records ar
+    LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
+    LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    WHERE ar.review_cause IS NOT NULL AND ar.review_done = 0 AND ar.follow_up_due_date IS NOT NULL AND DATE(ar.follow_up_due_date) < DATE('now')
+    ORDER BY ar.follow_up_due_date ASC, ar.created_at DESC LIMIT 20
+  `);
+
   ok(res, {
     statusStats, areaStats, batchProgress, boxStats,
-    pendingReviews, recentAnomalies, pendingFollowUps, operationTrend
+    pendingReviews, recentAnomalies, pendingFollowUps, operationTrend,
+    anomalyStats, overdueAnomalies
   });
 });
 

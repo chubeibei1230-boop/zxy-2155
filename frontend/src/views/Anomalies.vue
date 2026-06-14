@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h2>异常记录</h2>
+      <h2>异常闭环管理</h2>
       <div>
         <el-button type="primary" @click="exportExcel">
           <el-icon><Download /></el-icon>导出Excel
@@ -24,10 +24,11 @@
             <el-option label="复核缺失" value="missing_review" />
           </el-select>
         </el-form-item>
-        <el-form-item label="复盘状态">
+        <el-form-item label="跟进状态">
           <el-select v-model="filters.review_done" placeholder="全部" clearable style="width:120px;">
             <el-option label="未复盘" value="0" />
             <el-option label="跟进中" value="pending" />
+            <el-option label="已逾期" value="overdue" />
             <el-option label="跟进完成" value="1" />
           </el-select>
         </el-form-item>
@@ -43,6 +44,11 @@
         </el-form-item>
         <el-form-item label="操作人">
           <el-select v-model="filters.operator_id" placeholder="全部" clearable style="width:120px;">
+            <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="责任人">
+          <el-select v-model="filters.follow_up_user_id" placeholder="全部" clearable style="width:120px;">
             <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
         </el-form-item>
@@ -63,7 +69,7 @@
       </el-form>
     </div>
     <div class="table-card">
-      <el-table :data="list" stripe border>
+      <el-table :data="list" stripe border @row-click="goDetail">
         <el-table-column prop="created_at" label="异常时间" width="170" />
         <el-table-column label="类型" width="110">
           <template #default="{ row }">
@@ -91,14 +97,15 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="复盘状态" width="100">
+        <el-table-column label="闭环状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" v-if="row.review_done" type="success">跟进完成</el-tag>
+            <el-tag size="small" v-else-if="row.review_cause && !row.review_done && isOverdue(row.follow_up_due_date)" type="danger">已逾期</el-tag>
             <el-tag size="small" v-else-if="row.review_cause" type="warning">跟进中</el-tag>
             <el-tag size="small" v-else type="info">未复盘</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="follow_up_user_name" label="跟进人" width="90" />
+        <el-table-column prop="follow_up_user_name" label="责任人" width="90" />
         <el-table-column label="截止时间" width="110">
           <template #default="{ row }">
             <span v-if="row.follow_up_due_date" :class="{ 'overdue': !row.review_done && isOverdue(row.follow_up_due_date) }">
@@ -107,13 +114,13 @@
             <span v-else style="color:#c0c4cc">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link @click="openResolve(row)" v-if="!row.resolved">处理</el-button>
-            <el-button type="warning" link @click="openReview(row)" v-if="!row.review_cause">复盘</el-button>
-            <el-button type="warning" link @click="openReview(row, true)" v-if="row.review_cause && !row.review_done">编辑</el-button>
-            <el-button type="success" link @click="openReviewComplete(row)" v-if="row.review_cause && !row.review_done">完成跟进</el-button>
-            <el-button type="info" link @click="openReviewDetail(row)" v-if="row.review_cause">详情</el-button>
+            <el-button type="primary" link @click.stop="goDetail(row)">查看</el-button>
+            <el-button type="primary" link @click.stop="openResolve(row)" v-if="!row.resolved">处理</el-button>
+            <el-button type="warning" link @click.stop="openReview(row)" v-if="!row.review_cause">复盘</el-button>
+            <el-button type="warning" link @click.stop="openReview(row, true)" v-if="row.review_cause && !row.review_done">编辑</el-button>
+            <el-button type="success" link @click.stop="openReviewComplete(row)" v-if="row.review_cause && !row.review_done">完成</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -180,46 +187,18 @@
         <el-button type="primary" @click="doReviewComplete">确认完成</el-button>
       </template>
     </el-dialog>
-
-    <el-dialog v-model="reviewDetailDialogVisible" title="复盘详情" width="520px">
-      <el-descriptions :column="1" border size="small">
-        <el-descriptions-item label="异常描述">{{ currentRow?.description }}</el-descriptions-item>
-        <el-descriptions-item label="异常原因">{{ currentRow?.review_cause || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="责任环节">{{ currentRow?.review_link || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="跟进人">{{ currentRow?.follow_up_user_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="预计完成时间">{{ currentRow?.follow_up_due_date || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="复盘人">{{ currentRow?.reviewed_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="复盘时间">{{ currentRow?.reviewed_at || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="复盘状态">
-          <el-tag size="small" v-if="currentRow?.review_done" type="success">跟进完成</el-tag>
-          <el-tag size="small" v-else-if="currentRow?.review_cause" type="warning">跟进中</el-tag>
-          <el-tag size="small" v-else type="info">未复盘</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="跟进完成时间" v-if="currentRow?.review_done">{{ currentRow?.review_done_at }}</el-descriptions-item>
-        <el-descriptions-item label="跟进完成说明" v-if="currentRow?.review_done">{{ currentRow?.review_done_remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="处理状态">
-          <el-tag size="small" :type="currentRow?.resolved ? 'success' : 'danger'">
-            {{ currentRow?.resolved ? '已处理' : '未处理' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="处理人" v-if="currentRow?.resolved">{{ currentRow?.resolved_name || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="处理备注" v-if="currentRow?.resolved">{{ currentRow?.resolved_remark || '-' }}</el-descriptions-item>
-      </el-descriptions>
-      <template #footer>
-        <el-button @click="reviewDetailDialogVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 
 const route = useRoute()
+const router = useRouter()
 
 const list = ref([])
 const dateRange = ref([])
@@ -228,7 +207,6 @@ const currentRow = ref(null)
 const resolveRemark = ref('')
 const reviewDialogVisible = ref(false)
 const reviewCompleteDialogVisible = ref(false)
-const reviewDetailDialogVisible = ref(false)
 const reviewCompleteRemark = ref('')
 const isEditReview = ref(false)
 const users = ref([])
@@ -247,6 +225,7 @@ const filters = reactive({
   batch_id: '',
   area_id: '',
   operator_id: '',
+  follow_up_user_id: '',
   start_date: '',
   end_date: ''
 })
@@ -266,7 +245,7 @@ function isOverdue(dateStr) {
 }
 
 function resetFilters() {
-  Object.assign(filters, { resolved: '', anomaly_type: '', review_done: '', batch_id: '', area_id: '', operator_id: '', start_date: '', end_date: '' })
+  Object.assign(filters, { resolved: '', anomaly_type: '', review_done: '', batch_id: '', area_id: '', operator_id: '', follow_up_user_id: '', start_date: '', end_date: '' })
   dateRange.value = []
   loadData()
 }
@@ -298,10 +277,17 @@ async function loadData() {
 
 function initFiltersFromRoute() {
   const q = route.query
-  if (q.review_done) filters.review_done = q.review_done
-  if (q.batch_id) filters.batch_id = q.batch_id
-  if (q.area_id) filters.area_id = q.area_id
+  if (q.review_done) filters.review_done = String(q.review_done)
+  if (q.batch_id) filters.batch_id = Number(q.batch_id)
+  if (q.area_id) filters.area_id = Number(q.area_id)
+  if (q.follow_up_user_id) filters.follow_up_user_id = Number(q.follow_up_user_id)
   if (q.resolved !== undefined && q.resolved !== '') filters.resolved = Number(q.resolved)
+}
+
+function goDetail(row) {
+  if (row && row.id) {
+    router.push(`/anomalies/${row.id}`)
+  }
 }
 
 function openResolve(row) {
@@ -366,11 +352,6 @@ async function doReviewComplete() {
   }
 }
 
-function openReviewDetail(row) {
-  currentRow.value = row
-  reviewDetailDialogVisible.value = true
-}
-
 function exportExcel() {
   window.open('/api/export/anomalies', '_blank')
 }
@@ -395,5 +376,8 @@ watch(() => route.query, () => {
 .overdue {
   color: #f56c6c;
   font-weight: 600;
+}
+.el-table >>> tbody tr {
+  cursor: pointer;
 }
 </style>
