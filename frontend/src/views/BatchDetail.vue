@@ -197,7 +197,7 @@ const filteredRecords = computed(() => {
 })
 
 const unresolvedCount = computed(() => anomalies.value.filter(a => !a.resolved).length)
-const followingCount = computed(() => anomalies.value.filter(a => a.review_cause && !a.review_done).length)
+const followingCount = computed(() => anomalies.value.filter(a => a.review_cause && !a.review_done && !isOverdue(a.follow_up_due_date)).length)
 const overdueCount = computed(() => anomalies.value.filter(a => a.review_cause && !a.review_done && isOverdue(a.follow_up_due_date)).length)
 const completedCount = computed(() => anomalies.value.filter(a => a.review_done).length)
 

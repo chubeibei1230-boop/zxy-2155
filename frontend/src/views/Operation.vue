@@ -131,7 +131,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  Download, Sell, SunFilled, CircleCheck, Upload
+  Download, Sell, Sunny, CircleCheck, Upload
 } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 
@@ -150,7 +150,7 @@ const tableRef = ref()
 const operations = [
   { type: '收回', from: '待收回', to: '已收回', color: '#909399', icon: Download },
   { type: '清洗', from: '已收回', to: '清洗中', color: '#e6a23c', icon: Sell },
-  { type: '晾置', from: '清洗中', to: '待复核', color: '#36cfc9', icon: SunFilled },
+  { type: '晾置', from: '清洗中', to: '待复核', color: '#36cfc9', icon: Sunny },
   { type: '复核', from: '待复核', to: '可入库', color: '#f56c6c', icon: CircleCheck },
   { type: '入库', from: '可入库', to: '待收回', color: '#67c23a', icon: Upload }
 ]

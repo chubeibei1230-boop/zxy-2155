@@ -26,7 +26,7 @@
         </el-form-item>
         <el-form-item label="跟进状态">
           <el-select v-model="filters.review_done" placeholder="全部" clearable style="width:120px;">
-            <el-option label="未复盘" value="0" />
+            <el-option label="待处理" value="0" />
             <el-option label="跟进中" value="pending" />
             <el-option label="已逾期" value="overdue" />
             <el-option label="跟进完成" value="1" />
@@ -178,7 +178,7 @@
         <el-form-item label="跟进人">
           <span>{{ currentRow?.follow_up_user_name || '-' }}</span>
         </el-form-item>
-        <el-form-item label="跟进完成说明">
+        <el-form-item label="跟进完成说明" required>
           <el-input v-model="reviewCompleteRemark" type="textarea" :rows="3" placeholder="请填写跟进完成说明" />
         </el-form-item>
       </el-form>
@@ -236,6 +236,10 @@ const reviewForm = reactive({
   follow_up_due_date: ''
 })
 
+function emptyFilters() {
+  return { resolved: '', anomaly_type: '', review_done: '', batch_id: '', area_id: '', operator_id: '', follow_up_user_id: '', start_date: '', end_date: '' }
+}
+
 function isOverdue(dateStr) {
   if (!dateStr) return false
   const due = new Date(dateStr)
@@ -245,7 +249,7 @@ function isOverdue(dateStr) {
 }
 
 function resetFilters() {
-  Object.assign(filters, { resolved: '', anomaly_type: '', review_done: '', batch_id: '', area_id: '', operator_id: '', follow_up_user_id: '', start_date: '', end_date: '' })
+  Object.assign(filters, emptyFilters())
   dateRange.value = []
   loadData()
 }
@@ -273,15 +277,6 @@ async function loadData() {
   }
   const res = await request.get('/anomalies', { params })
   if (res.code === 200) list.value = res.data
-}
-
-function initFiltersFromRoute() {
-  const q = route.query
-  if (q.review_done) filters.review_done = String(q.review_done)
-  if (q.batch_id) filters.batch_id = Number(q.batch_id)
-  if (q.area_id) filters.area_id = Number(q.area_id)
-  if (q.follow_up_user_id) filters.follow_up_user_id = Number(q.follow_up_user_id)
-  if (q.resolved !== undefined && q.resolved !== '') filters.resolved = Number(q.resolved)
 }
 
 function goDetail(row) {
@@ -342,6 +337,10 @@ function openReviewComplete(row) {
 }
 
 async function doReviewComplete() {
+  if (!reviewCompleteRemark.value) {
+    ElMessage.warning('请填写跟进完成说明')
+    return
+  }
   const res = await request.post(`/anomalies/${currentRow.value.id}/review-complete`, {
     remark: reviewCompleteRemark.value
   })
@@ -352,12 +351,28 @@ async function doReviewComplete() {
   }
 }
 
-function exportExcel() {
-  window.open('/api/export/anomalies', '_blank')
+async function exportExcel() {
+  const res = await request.get('/export/anomalies', { responseType: 'blob' })
+  const url = URL.createObjectURL(new Blob([res]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = '异常记录.xlsx'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function applyQueryFilters(q) {
+  Object.assign(filters, emptyFilters())
+  dateRange.value = []
+  if (q.review_done !== undefined && q.review_done !== '') filters.review_done = String(q.review_done)
+  if (q.batch_id) filters.batch_id = Number(q.batch_id)
+  if (q.area_id) filters.area_id = Number(q.area_id)
+  if (q.follow_up_user_id) filters.follow_up_user_id = Number(q.follow_up_user_id)
+  if (q.resolved !== undefined && q.resolved !== '') filters.resolved = Number(q.resolved)
 }
 
 onMounted(() => {
-  initFiltersFromRoute()
+  applyQueryFilters(route.query)
   loadUsers()
   loadBatches()
   loadAreas()
@@ -366,7 +381,7 @@ onMounted(() => {
 
 watch(() => route.query, () => {
   if (route.path === '/anomalies') {
-    initFiltersFromRoute()
+    applyQueryFilters(route.query)
     loadData()
   }
 })

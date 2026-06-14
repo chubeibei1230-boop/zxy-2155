@@ -486,13 +486,13 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   if (end_date) { sql += ' AND DATE(ar.created_at) <= ?'; params.push(end_date); }
   if (review_done !== undefined && review_done !== '') {
     if (review_done === 'pending') {
-      sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0';
+      sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0 AND (ar.follow_up_due_date IS NULL OR DATE(ar.follow_up_due_date) >= DATE(\'now\'))';
     } else if (review_done === 'overdue') {
       sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0 AND ar.follow_up_due_date IS NOT NULL AND DATE(ar.follow_up_due_date) < DATE(\'now\')';
     } else if (review_done === '1' || review_done === true) {
       sql += ' AND ar.review_done = 1';
     } else if (review_done === '0' || review_done === false) {
-      sql += ' AND ar.review_cause IS NULL';
+      sql += ' AND ar.resolved = 0 AND ar.review_cause IS NULL';
     }
   }
   if (batch_id) { sql += ' AND ar.batch_id = ?'; params.push(batch_id); }
