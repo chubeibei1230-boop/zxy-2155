@@ -594,6 +594,89 @@ app.post('/api/anomalies/:id/review-complete', authMiddleware, roleMiddleware('a
   ok(res, null, '复盘跟进已完成');
 });
 
+// 异常复盘整改看板
+app.get('/api/anomaly-board', authMiddleware, roleMiddleware('admin', 'auditor'), async (req, res) => {
+  const { batch_id, area_id, anomaly_type, follow_up_user_id, resolved, review_done, start_date, end_date } = req.query;
+
+  let baseSql = `
+    FROM anomaly_records ar
+    LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
+    LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    LEFT JOIN users ou ON ar.operator_id = ou.id
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (batch_id) { baseSql += ' AND ar.batch_id = ?'; params.push(batch_id); }
+  if (area_id) { baseSql += ' AND ar.area_id = ?'; params.push(area_id); }
+  if (anomaly_type) { baseSql += ' AND ar.anomaly_type = ?'; params.push(anomaly_type); }
+  if (follow_up_user_id) { baseSql += ' AND ar.follow_up_user_id = ?'; params.push(follow_up_user_id); }
+  if (resolved !== undefined && resolved !== '') {
+    baseSql += ' AND ar.resolved = ?';
+    params.push(resolved === '1' || resolved === true ? 1 : 0);
+  }
+  if (review_done !== undefined && review_done !== '') {
+    if (review_done === 'pending') {
+      baseSql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0 AND (ar.follow_up_due_date IS NULL OR DATE(ar.follow_up_due_date) >= DATE(\'now\'))';
+    } else if (review_done === 'overdue') {
+      baseSql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0 AND ar.follow_up_due_date IS NOT NULL AND DATE(ar.follow_up_due_date) < DATE(\'now\')';
+    } else if (review_done === '1' || review_done === true) {
+      baseSql += ' AND ar.review_done = 1';
+    } else if (review_done === '0' || review_done === false) {
+      baseSql += ' AND ar.resolved = 0 AND ar.review_cause IS NULL';
+    }
+  }
+  if (start_date) { baseSql += ' AND DATE(ar.created_at) >= ?'; params.push(start_date); }
+  if (end_date) { baseSql += ' AND DATE(ar.created_at) <= ?'; params.push(end_date); }
+
+  const stats = await get(`
+    SELECT
+      SUM(CASE WHEN ar.resolved = 0 AND ar.review_cause IS NULL THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN ar.review_cause IS NOT NULL AND ar.review_done = 0 AND (ar.follow_up_due_date IS NULL OR DATE(ar.follow_up_due_date) >= DATE('now')) THEN 1 ELSE 0 END) as following,
+      SUM(CASE WHEN ar.review_cause IS NOT NULL AND ar.review_done = 0 AND ar.follow_up_due_date IS NOT NULL AND DATE(ar.follow_up_due_date) < DATE('now') THEN 1 ELSE 0 END) as overdue,
+      SUM(CASE WHEN ar.review_done = 1 THEN 1 ELSE 0 END) as completed,
+      COUNT(*) as total
+    ${baseSql}
+  `, params);
+
+  const areaRank = await all(`
+    SELECT a.id, a.code, a.name, COUNT(*) as count
+    ${baseSql}
+    GROUP BY ar.area_id
+    ORDER BY count DESC
+    LIMIT 10
+  `, params);
+
+  const userRank = await all(`
+    SELECT fu.id, fu.name, COUNT(*) as count
+    ${baseSql}
+    AND ar.follow_up_user_id IS NOT NULL
+    GROUP BY ar.follow_up_user_id
+    ORDER BY count DESC
+    LIMIT 10
+  `, params);
+
+  const typeRank = await all(`
+    SELECT ar.anomaly_type, COUNT(*) as count
+    ${baseSql}
+    GROUP BY ar.anomaly_type
+    ORDER BY count DESC
+  `, params);
+
+  const listSql = `
+    SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
+      fu.name as follow_up_user_name, ou.name as operator_name
+    ${baseSql}
+    ORDER BY ar.created_at DESC
+    LIMIT 500
+  `;
+  const list = await all(listSql, params);
+
+  ok(res, { stats, areaRank, userRank, typeRank, list });
+});
+
 // 统计看板
 app.get('/api/dashboard', authMiddleware, async (req, res) => {
   await checkCleaningTimeout();

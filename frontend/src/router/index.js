@@ -50,6 +50,12 @@ const routes = [
         meta: { title: '提交操作', icon: 'Edit', roles: ['admin', 'user'] }
       },
       {
+        path: 'anomaly-board',
+        name: 'AnomalyBoard',
+        component: () => import('@/views/AnomalyBoard.vue'),
+        meta: { title: '异常复盘整改看板', icon: 'DataAnalysis', roles: ['admin', 'auditor'] }
+      },
+      {
         path: 'anomalies',
         name: 'Anomalies',
         component: () => import('@/views/Anomalies.vue'),
