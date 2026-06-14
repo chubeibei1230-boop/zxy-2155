@@ -151,6 +151,11 @@ app.get('/api/users', authMiddleware, roleMiddleware('admin'), async (req, res) 
   ok(res, data);
 });
 
+app.get('/api/users/brief', authMiddleware, roleMiddleware('admin', 'auditor'), async (req, res) => {
+  const data = await all('SELECT id, name, role FROM users ORDER BY id');
+  ok(res, data);
+});
+
 app.post('/api/users', authMiddleware, roleMiddleware('admin'), async (req, res) => {
   const { username, name, role, password } = req.body;
   if (!username || !name || !role) return fail(res, '请填写完整信息');
@@ -455,7 +460,7 @@ app.post('/api/operations', authMiddleware, roleMiddleware('user', 'admin'), asy
 
 // 异常记录
 app.get('/api/anomalies', authMiddleware, async (req, res) => {
-  const { resolved, anomaly_type, start_date, end_date, review_done } = req.query;
+  const { resolved, anomaly_type, start_date, end_date, review_done, batch_id, area_id, operator_id } = req.query;
   let sql = `
     SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
       tb.code as box_code, u.name as resolved_name,
@@ -484,9 +489,12 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
     } else if (review_done === '1' || review_done === true) {
       sql += ' AND ar.review_done = 1';
     } else if (review_done === '0' || review_done === false) {
-      sql += ' AND ar.review_done = 0';
+      sql += ' AND ar.review_cause IS NULL';
     }
   }
+  if (batch_id) { sql += ' AND ar.batch_id = ?'; params.push(batch_id); }
+  if (area_id) { sql += ' AND ar.area_id = ?'; params.push(area_id); }
+  if (operator_id) { sql += ' AND ar.reviewed_by = ?'; params.push(operator_id); }
   sql += ' ORDER BY ar.created_at DESC';
   const data = await all(sql, params);
   ok(res, data);

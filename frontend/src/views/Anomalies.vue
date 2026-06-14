@@ -11,13 +11,13 @@
     <div class="filter-bar">
       <el-form inline>
         <el-form-item label="处理状态">
-          <el-select v-model="filters.resolved" placeholder="全部" clearable style="width:140px;">
+          <el-select v-model="filters.resolved" placeholder="全部" clearable style="width:120px;">
             <el-option label="未处理" :value="0" />
             <el-option label="已处理" :value="1" />
           </el-select>
         </el-form-item>
         <el-form-item label="异常类型">
-          <el-select v-model="filters.anomaly_type" placeholder="全部" clearable style="width:140px;">
+          <el-select v-model="filters.anomaly_type" placeholder="全部" clearable style="width:120px;">
             <el-option label="清洗超时" value="cleaning_timeout" />
             <el-option label="区域集中" value="area_cluster" />
             <el-option label="箱子过载" value="box_overload" />
@@ -25,10 +25,25 @@
           </el-select>
         </el-form-item>
         <el-form-item label="复盘状态">
-          <el-select v-model="filters.review_done" placeholder="全部" clearable style="width:140px;">
+          <el-select v-model="filters.review_done" placeholder="全部" clearable style="width:120px;">
             <el-option label="未复盘" value="0" />
             <el-option label="跟进中" value="pending" />
             <el-option label="跟进完成" value="1" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="批次">
+          <el-select v-model="filters.batch_id" placeholder="全部" clearable style="width:140px;">
+            <el-option v-for="b in batches" :key="b.id" :label="b.code + ' ' + b.name" :value="b.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="区域">
+          <el-select v-model="filters.area_id" placeholder="全部" clearable style="width:140px;">
+            <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="复盘人">
+          <el-select v-model="filters.operator_id" placeholder="全部" clearable style="width:120px;">
+            <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="日期范围">
@@ -197,10 +212,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+
+const route = useRoute()
 
 const list = ref([])
 const dateRange = ref([])
@@ -213,6 +231,8 @@ const reviewDetailDialogVisible = ref(false)
 const reviewCompleteRemark = ref('')
 const isEditReview = ref(false)
 const users = ref([])
+const batches = ref([])
+const areas = ref([])
 const typeMap = {
   cleaning_timeout: '清洗超时',
   area_cluster: '区域集中',
@@ -223,6 +243,9 @@ const filters = reactive({
   resolved: '',
   anomaly_type: '',
   review_done: '',
+  batch_id: '',
+  area_id: '',
+  operator_id: '',
   start_date: '',
   end_date: ''
 })
@@ -242,14 +265,24 @@ function isOverdue(dateStr) {
 }
 
 function resetFilters() {
-  Object.assign(filters, { resolved: '', anomaly_type: '', review_done: '', start_date: '', end_date: '' })
+  Object.assign(filters, { resolved: '', anomaly_type: '', review_done: '', batch_id: '', area_id: '', operator_id: '', start_date: '', end_date: '' })
   dateRange.value = []
   loadData()
 }
 
 async function loadUsers() {
-  const res = await request.get('/users')
+  const res = await request.get('/users/brief')
   if (res.code === 200) users.value = res.data
+}
+
+async function loadBatches() {
+  const res = await request.get('/batches')
+  if (res.code === 200) batches.value = res.data
+}
+
+async function loadAreas() {
+  const res = await request.get('/areas')
+  if (res.code === 200) areas.value = res.data
 }
 
 async function loadData() {
@@ -260,6 +293,14 @@ async function loadData() {
   }
   const res = await request.get('/anomalies', { params })
   if (res.code === 200) list.value = res.data
+}
+
+function initFiltersFromRoute() {
+  const q = route.query
+  if (q.review_done) filters.review_done = q.review_done
+  if (q.batch_id) filters.batch_id = q.batch_id
+  if (q.area_id) filters.area_id = q.area_id
+  if (q.resolved !== undefined && q.resolved !== '') filters.resolved = Number(q.resolved)
 }
 
 function openResolve(row) {
@@ -334,8 +375,18 @@ function exportExcel() {
 }
 
 onMounted(() => {
+  initFiltersFromRoute()
   loadUsers()
+  loadBatches()
+  loadAreas()
   loadData()
+})
+
+watch(() => route.query, () => {
+  if (route.path === '/anomalies') {
+    initFiltersFromRoute()
+    loadData()
+  }
 })
 </script>
 

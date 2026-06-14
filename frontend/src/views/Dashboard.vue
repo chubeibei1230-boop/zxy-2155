@@ -192,7 +192,7 @@ function goOperation() {
   router.push('/operation')
 }
 function goAnomalies() {
-  router.push('/anomalies')
+  router.push({ path: '/anomalies', query: { review_done: 'pending' } })
 }
 
 function renderAreaChart() {
