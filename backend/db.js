@@ -148,12 +148,23 @@ async function initDB() {
       resolved_by INTEGER,
       resolved_at DATETIME,
       resolved_remark TEXT,
+      review_cause TEXT,
+      review_link TEXT,
+      follow_up_user_id INTEGER,
+      follow_up_due_date TEXT,
+      review_done INTEGER NOT NULL DEFAULT 0,
+      review_done_at DATETIME,
+      review_done_remark TEXT,
+      reviewed_by INTEGER,
+      reviewed_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (seat_mat_id) REFERENCES seat_mats(id),
       FOREIGN KEY (batch_id) REFERENCES cleaning_batches(id),
       FOREIGN KEY (box_id) REFERENCES turnover_boxes(id),
       FOREIGN KEY (area_id) REFERENCES areas(id),
-      FOREIGN KEY (record_id) REFERENCES operation_records(id)
+      FOREIGN KEY (record_id) REFERENCES operation_records(id),
+      FOREIGN KEY (follow_up_user_id) REFERENCES users(id),
+      FOREIGN KEY (reviewed_by) REFERENCES users(id)
     );
   `);
 
@@ -203,6 +214,25 @@ async function initDB() {
   }
 }
 
-initDB().catch(console.error);
+initDB().then(async () => {
+  const cols = await all("PRAGMA table_info(anomaly_records)");
+  const colNames = cols.map(c => c.name);
+  const migrations = [
+    { name: 'review_cause', sql: "ALTER TABLE anomaly_records ADD COLUMN review_cause TEXT" },
+    { name: 'review_link', sql: "ALTER TABLE anomaly_records ADD COLUMN review_link TEXT" },
+    { name: 'follow_up_user_id', sql: "ALTER TABLE anomaly_records ADD COLUMN follow_up_user_id INTEGER REFERENCES users(id)" },
+    { name: 'follow_up_due_date', sql: "ALTER TABLE anomaly_records ADD COLUMN follow_up_due_date TEXT" },
+    { name: 'review_done', sql: "ALTER TABLE anomaly_records ADD COLUMN review_done INTEGER NOT NULL DEFAULT 0" },
+    { name: 'review_done_at', sql: "ALTER TABLE anomaly_records ADD COLUMN review_done_at DATETIME" },
+    { name: 'review_done_remark', sql: "ALTER TABLE anomaly_records ADD COLUMN review_done_remark TEXT" },
+    { name: 'reviewed_by', sql: "ALTER TABLE anomaly_records ADD COLUMN reviewed_by INTEGER REFERENCES users(id)" },
+    { name: 'reviewed_at', sql: "ALTER TABLE anomaly_records ADD COLUMN reviewed_at DATETIME" },
+  ];
+  for (const m of migrations) {
+    if (!colNames.includes(m.name)) {
+      await run(m.sql);
+    }
+  }
+}).catch(console.error);
 
 module.exports = { run, get, all, exec, serialize };

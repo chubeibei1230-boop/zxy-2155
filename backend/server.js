@@ -239,7 +239,19 @@ app.get('/api/batches/:id', authMiddleware, async (req, res) => {
     ORDER BY MIN(r.created_at)
   `, [req.params.id]);
 
-  ok(res, { batch, records, timeline });
+  const anomalies = await all(`
+    SELECT ar.*, sm.code as mat_code, a.name as area_name,
+      fu.name as follow_up_user_name, ru.name as reviewed_name
+    FROM anomaly_records ar
+    LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
+    LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    LEFT JOIN users ru ON ar.reviewed_by = ru.id
+    WHERE ar.batch_id = ?
+    ORDER BY ar.created_at DESC
+  `, [req.params.id]);
+
+  ok(res, { batch, records, timeline, anomalies });
 });
 
 app.post('/api/batches', authMiddleware, roleMiddleware('admin', 'user'), async (req, res) => {
@@ -443,16 +455,19 @@ app.post('/api/operations', authMiddleware, roleMiddleware('user', 'admin'), asy
 
 // 异常记录
 app.get('/api/anomalies', authMiddleware, async (req, res) => {
-  const { resolved, anomaly_type, start_date, end_date } = req.query;
+  const { resolved, anomaly_type, start_date, end_date, review_done } = req.query;
   let sql = `
     SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
-      tb.code as box_code, u.name as resolved_name
+      tb.code as box_code, u.name as resolved_name,
+      fu.name as follow_up_user_name, ru.name as reviewed_name
     FROM anomaly_records ar
     LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
     LEFT JOIN areas a ON ar.area_id = a.id
     LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
     LEFT JOIN turnover_boxes tb ON ar.box_id = tb.id
     LEFT JOIN users u ON ar.resolved_by = u.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    LEFT JOIN users ru ON ar.reviewed_by = ru.id
     WHERE 1=1
   `;
   const params = [];
@@ -463,6 +478,15 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   if (anomaly_type) { sql += ' AND ar.anomaly_type = ?'; params.push(anomaly_type); }
   if (start_date) { sql += ' AND DATE(ar.created_at) >= ?'; params.push(start_date); }
   if (end_date) { sql += ' AND DATE(ar.created_at) <= ?'; params.push(end_date); }
+  if (review_done !== undefined && review_done !== '') {
+    if (review_done === 'pending') {
+      sql += ' AND ar.review_cause IS NOT NULL AND ar.review_done = 0';
+    } else if (review_done === '1' || review_done === true) {
+      sql += ' AND ar.review_done = 1';
+    } else if (review_done === '0' || review_done === false) {
+      sql += ' AND ar.review_done = 0';
+    }
+  }
   sql += ' ORDER BY ar.created_at DESC';
   const data = await all(sql, params);
   ok(res, data);
@@ -475,6 +499,39 @@ app.post('/api/anomalies/:id/resolve', authMiddleware, async (req, res) => {
     WHERE id=?
   `, [req.user.id, remark || '', req.params.id]);
   ok(res, null, '已处理');
+});
+
+app.post('/api/anomalies/:id/review', authMiddleware, roleMiddleware('admin', 'auditor'), async (req, res) => {
+  const { review_cause, review_link, follow_up_user_id, follow_up_due_date } = req.body;
+  if (!review_cause) return fail(res, '异常原因不能为空');
+  await run(`
+    UPDATE anomaly_records SET review_cause=?, review_link=?, follow_up_user_id=?, follow_up_due_date=?,
+      reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `, [review_cause, review_link || '', follow_up_user_id || null, follow_up_due_date || null, req.user.id, req.params.id]);
+  ok(res, null, '复盘归因已保存');
+});
+
+app.put('/api/anomalies/:id/review', authMiddleware, roleMiddleware('admin', 'auditor'), async (req, res) => {
+  const { review_cause, review_link, follow_up_user_id, follow_up_due_date } = req.body;
+  await run(`
+    UPDATE anomaly_records SET review_cause=?, review_link=?, follow_up_user_id=?, follow_up_due_date=?
+    WHERE id=?
+  `, [review_cause || '', review_link || '', follow_up_user_id || null, follow_up_due_date || null, req.params.id]);
+  ok(res, null, '复盘信息已更新');
+});
+
+app.post('/api/anomalies/:id/review-complete', authMiddleware, roleMiddleware('admin', 'auditor'), async (req, res) => {
+  const { remark } = req.body;
+  const anomaly = await get('SELECT * FROM anomaly_records WHERE id=?', [req.params.id]);
+  if (!anomaly) return fail(res, '异常记录不存在', 404);
+  if (!anomaly.review_cause) return fail(res, '请先进行复盘归因');
+  if (anomaly.review_done) return fail(res, '该异常已完成复盘跟进');
+  await run(`
+    UPDATE anomaly_records SET review_done=1, review_done_at=CURRENT_TIMESTAMP, review_done_remark=?
+    WHERE id=?
+  `, [remark || '', req.params.id]);
+  ok(res, null, '复盘跟进已完成');
 });
 
 // 统计看板
@@ -524,12 +581,25 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
     ORDER BY sm.id DESC LIMIT 20
   `);
   const recentAnomalies = await all(`
-    SELECT ar.*, sm.code as mat_code, a.name as area_name
+    SELECT ar.*, sm.code as mat_code, a.name as area_name,
+      fu.name as follow_up_user_name
     FROM anomaly_records ar
     LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
     LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
     WHERE ar.resolved = 0
     ORDER BY ar.created_at DESC LIMIT 10
+  `);
+  const pendingFollowUps = await all(`
+    SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
+      fu.name as follow_up_user_name
+    FROM anomaly_records ar
+    LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
+    LEFT JOIN areas a ON ar.area_id = a.id
+    LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
+    LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+    WHERE ar.review_cause IS NOT NULL AND ar.review_done = 0
+    ORDER BY ar.follow_up_due_date ASC, ar.created_at DESC LIMIT 20
   `);
   const operationTrend = await all(`
     SELECT DATE(created_at) as date, operation_type, COUNT(*) as count
@@ -541,7 +611,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
 
   ok(res, {
     statusStats, areaStats, batchProgress, boxStats,
-    pendingReviews, recentAnomalies, operationTrend
+    pendingReviews, recentAnomalies, pendingFollowUps, operationTrend
   });
 });
 
@@ -555,12 +625,19 @@ app.get('/api/export/:type', authMiddleware, roleMiddleware('auditor', 'admin'),
       SELECT ar.created_at as 创建时间, ar.anomaly_type as 异常类型, ar.severity as 严重程度, ar.description as 描述,
         sm.code as 座席垫编号, a.name as 区域, cb.code as 批次, tb.code as 周转箱,
         CASE WHEN ar.resolved=1 THEN '已处理' ELSE '未处理' END as 状态,
-        ar.resolved_remark as 处理备注
+        ar.resolved_remark as 处理备注,
+        ar.review_cause as 异常原因, ar.review_link as 责任环节,
+        fu.name as 跟进人, ar.follow_up_due_date as 预计完成时间,
+        CASE WHEN ar.review_done=1 THEN '已完成' WHEN ar.review_cause IS NOT NULL THEN '跟进中' ELSE '未复盘' END as 复盘状态,
+        ar.review_done_remark as 跟进完成说明,
+        ru.name as 复盘人, ar.reviewed_at as 复盘时间
       FROM anomaly_records ar
       LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
       LEFT JOIN areas a ON ar.area_id = a.id
       LEFT JOIN cleaning_batches cb ON ar.batch_id = cb.id
       LEFT JOIN turnover_boxes tb ON ar.box_id = tb.id
+      LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
+      LEFT JOIN users ru ON ar.reviewed_by = ru.id
       ORDER BY ar.created_at DESC
     `);
     filename = '异常记录.xlsx';

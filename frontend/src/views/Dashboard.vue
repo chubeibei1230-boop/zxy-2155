@@ -21,6 +21,10 @@
         <div class="stat-value" style="color:#909399">{{ stats.anomaly || 0 }}</div>
         <div class="stat-label">异常留置</div>
       </div>
+      <div class="stat-card" style="cursor:pointer;" @click="goAnomalies">
+        <div class="stat-value" style="color:#e6a23c">{{ pendingFollowUpCount }}</div>
+        <div class="stat-label">待跟进异常</div>
+      </div>
     </div>
 
     <el-row :gutter="16" style="margin-bottom:16px;">
@@ -100,20 +104,26 @@
       <el-col :span="10">
         <div class="table-card" style="height:100%;">
           <div class="page-header">
-            <h2>最新异常</h2>
-            <el-button type="danger" link @click="goAnomalies" v-if="userStore.isAuditor || userStore.isAdmin">查看全部</el-button>
+            <h2>未完成跟进事项</h2>
+            <el-button type="warning" link @click="goAnomalies" v-if="userStore.isAuditor || userStore.isAdmin">查看全部</el-button>
           </div>
-          <el-table :data="dashboard.recentAnomalies || []" stripe max-height="340">
-            <el-table-column label="类型" width="100">
+          <el-table :data="dashboard.pendingFollowUps || []" stripe max-height="340" v-if="(dashboard.pendingFollowUps || []).length > 0">
+            <el-table-column label="类型" width="80">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.severity === 'high' ? 'danger' : 'warning'">{{ anomalyTypeMap[row.anomaly_type] }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-            <el-table-column label="时间" width="160">
-              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            <el-table-column prop="description" label="描述" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="follow_up_user_name" label="跟进人" width="80" />
+            <el-table-column label="截止" width="100">
+              <template #default="{ row }">
+                <span :class="{ 'overdue': row.follow_up_due_date && isOverdue(row.follow_up_due_date) }">
+                  {{ row.follow_up_due_date || '-' }}
+                </span>
+              </template>
             </el-table-column>
           </el-table>
+          <el-empty v-else description="暂无待跟进事项" :image-size="60" />
         </div>
       </el-col>
     </el-row>
@@ -159,8 +169,20 @@ const stats = computed(() => {
   }
 })
 
+const pendingFollowUpCount = computed(() => {
+  return (dashboard.pendingFollowUps || []).length
+})
+
 function formatTime(t) {
   return dayjs(t).format('YYYY-MM-DD HH:mm')
+}
+
+function isOverdue(dateStr) {
+  if (!dateStr) return false
+  const due = new Date(dateStr)
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  return due < now
 }
 
 function goBatchDetail(id) {
@@ -275,8 +297,12 @@ onUnmounted(() => {
 <style scoped>
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+.overdue {
+  color: #f56c6c;
+  font-weight: 600;
 }
 </style>

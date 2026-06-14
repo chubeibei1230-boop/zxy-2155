@@ -81,6 +81,56 @@
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
       </el-table>
     </div>
+
+    <div class="table-card" style="margin-top:16px;" v-if="anomalies.length > 0">
+      <div class="page-header" style="margin-bottom:12px;">
+        <h3 style="margin:0;">批次关联异常（{{ anomalies.length }}）</h3>
+        <div>
+          <el-tag type="danger" size="small">{{ anomalies.filter(a => !a.resolved).length }} 未处理</el-tag>
+          <el-tag type="warning" size="small" style="margin-left:8px;">{{ anomalies.filter(a => a.review_cause && !a.review_done).length }} 跟进中</el-tag>
+          <el-tag type="success" size="small" style="margin-left:8px;">{{ anomalies.filter(a => a.review_done).length }} 已完成</el-tag>
+        </div>
+      </div>
+      <el-table :data="anomalies" stripe border size="small">
+        <el-table-column prop="created_at" label="异常时间" width="170" />
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.severity === 'high' ? 'danger' : 'warning'">
+              {{ anomalyTypeMap[row.anomaly_type] || row.anomaly_type }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="mat_code" label="座席垫" width="110" />
+        <el-table-column prop="area_name" label="区域" width="120" />
+        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+        <el-table-column label="处理状态" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.resolved ? 'success' : 'danger'">
+              {{ row.resolved ? '已处理' : '未处理' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="复盘状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" v-if="row.review_done" type="success">跟进完成</el-tag>
+            <el-tag size="small" v-else-if="row.review_cause" type="warning">跟进中</el-tag>
+            <el-tag size="small" v-else type="info">未复盘</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="review_cause" label="异常原因" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="review_link" label="责任环节" width="110" show-overflow-tooltip />
+        <el-table-column prop="follow_up_user_name" label="跟进人" width="90" />
+        <el-table-column label="截止时间" width="110">
+          <template #default="{ row }">
+            <span v-if="row.follow_up_due_date" :class="{ 'overdue': !row.review_done && isOverdue(row.follow_up_due_date) }">
+              {{ row.follow_up_due_date }}
+            </span>
+            <span v-else style="color:#c0c4cc">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="review_done_remark" label="跟进说明" min-width="120" show-overflow-tooltip />
+      </el-table>
+    </div>
   </div>
 </template>
 
@@ -94,8 +144,16 @@ const route = useRoute()
 const batch = ref(null)
 const records = ref([])
 const timeline = ref([])
+const anomalies = ref([])
 const filters = reactive({ operation_type: '' })
 const opTypes = ['收回', '清洗', '晾置', '复核', '入库']
+
+const anomalyTypeMap = {
+  cleaning_timeout: '清洗超时',
+  area_cluster: '区域集中',
+  box_overload: '箱子过载',
+  missing_review: '复核缺失'
+}
 
 const filteredRecords = computed(() => {
   if (!filters.operation_type) return records.value
@@ -110,14 +168,30 @@ function opTypeColor(op) {
   return map[op] || ''
 }
 
+function isOverdue(dateStr) {
+  if (!dateStr) return false
+  const due = new Date(dateStr)
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  return due < now
+}
+
 async function loadData() {
   const res = await request.get(`/batches/${route.params.id}`)
   if (res.code === 200) {
     batch.value = res.data.batch
     records.value = res.data.records
     timeline.value = res.data.timeline
+    anomalies.value = res.data.anomalies || []
   }
 }
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.overdue {
+  color: #f56c6c;
+  font-weight: 600;
+}
+</style>
