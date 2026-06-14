@@ -144,6 +144,7 @@ async function initDB() {
       area_id INTEGER,
       description TEXT NOT NULL,
       record_id INTEGER,
+      operator_id INTEGER,
       resolved INTEGER NOT NULL DEFAULT 0,
       resolved_by INTEGER,
       resolved_at DATETIME,
@@ -163,6 +164,7 @@ async function initDB() {
       FOREIGN KEY (box_id) REFERENCES turnover_boxes(id),
       FOREIGN KEY (area_id) REFERENCES areas(id),
       FOREIGN KEY (record_id) REFERENCES operation_records(id),
+      FOREIGN KEY (operator_id) REFERENCES users(id),
       FOREIGN KEY (follow_up_user_id) REFERENCES users(id),
       FOREIGN KEY (reviewed_by) REFERENCES users(id)
     );
@@ -227,6 +229,7 @@ initDB().then(async () => {
     { name: 'review_done_remark', sql: "ALTER TABLE anomaly_records ADD COLUMN review_done_remark TEXT" },
     { name: 'reviewed_by', sql: "ALTER TABLE anomaly_records ADD COLUMN reviewed_by INTEGER REFERENCES users(id)" },
     { name: 'reviewed_at', sql: "ALTER TABLE anomaly_records ADD COLUMN reviewed_at DATETIME" },
+    { name: 'operator_id', sql: "ALTER TABLE anomaly_records ADD COLUMN operator_id INTEGER REFERENCES users(id)" },
   ];
   for (const m of migrations) {
     if (!colNames.includes(m.name)) {

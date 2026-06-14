@@ -41,7 +41,7 @@
             <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="复盘人">
+        <el-form-item label="操作人">
           <el-select v-model="filters.operator_id" placeholder="全部" clearable style="width:120px;">
             <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
@@ -82,6 +82,7 @@
         <el-table-column prop="mat_code" label="座席垫" width="110" />
         <el-table-column prop="area_name" label="区域" width="130" />
         <el-table-column prop="batch_code" label="批次" width="120" />
+        <el-table-column prop="operator_name" label="操作人" width="90" />
         <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
         <el-table-column label="处理状态" width="90">
           <template #default="{ row }">

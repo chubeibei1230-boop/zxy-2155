@@ -286,7 +286,7 @@ async function checkCleaningTimeout() {
   const timeoutHours = config.timeoutHours || 8;
 
   const cleaningMats = await all(`
-    SELECT sm.*, r.created_at as cleaning_started, r.batch_id
+    SELECT sm.*, r.id as record_id, r.created_at as cleaning_started, r.batch_id, r.operator_id
     FROM seat_mats sm
     JOIN operation_records r ON sm.id = r.seat_mat_id
     WHERE sm.status = '清洗中'
@@ -299,9 +299,9 @@ async function checkCleaningTimeout() {
     const exists = await get("SELECT * FROM anomaly_records WHERE seat_mat_id=? AND anomaly_type='cleaning_timeout' AND resolved=0", [mat.id]);
     if (!exists) {
       await run(`
-        INSERT INTO anomaly_records (anomaly_type, severity, seat_mat_id, batch_id, area_id, description)
-        VALUES ('cleaning_timeout', 'high', ?, ?, ?, ?)
-      `, [mat.id, mat.batch_id || null, mat.area_id, `座席垫 ${mat.code} 清洗已超过${timeoutHours}小时未完成`]);
+        INSERT INTO anomaly_records (anomaly_type, severity, seat_mat_id, batch_id, area_id, record_id, operator_id, description)
+        VALUES ('cleaning_timeout', 'high', ?, ?, ?, ?, ?, ?)
+      `, [mat.id, mat.batch_id || null, mat.area_id, mat.record_id, mat.operator_id, `座席垫 ${mat.code} 清洗已超过${timeoutHours}小时未完成`]);
     }
   }
 }
@@ -393,9 +393,9 @@ app.post('/api/operations', authMiddleware, roleMiddleware('user', 'admin'), asy
         const rule = await get("SELECT * FROM check_rules WHERE rule_type='missing_review' AND enabled=1");
         if (rule) {
           await run(`
-            INSERT INTO anomaly_records (anomaly_type, severity, seat_mat_id, batch_id, area_id, description)
-            VALUES ('missing_review', 'high', ?, ?, ?, ?)
-          `, [mat.id, batch_id || mat.current_batch_id, mat.area_id, `座席垫 ${mat.code} 未经复核直接入库，当前状态: ${mat.status}`]);
+            INSERT INTO anomaly_records (anomaly_type, severity, seat_mat_id, batch_id, area_id, operator_id, description)
+            VALUES ('missing_review', 'high', ?, ?, ?, ?, ?)
+          `, [mat.id, batch_id || mat.current_batch_id, mat.area_id, req.user.id, `座席垫 ${mat.code} 未经复核直接入库，当前状态: ${mat.status}`]);
         }
       }
 
@@ -420,9 +420,9 @@ app.post('/api/operations', authMiddleware, roleMiddleware('user', 'admin'), asy
           const rule = await get("SELECT * FROM check_rules WHERE rule_type='box_overload' AND enabled=1");
           if (rule) {
             await run(`
-              INSERT INTO anomaly_records (anomaly_type, severity, box_id, description)
-              VALUES ('box_overload', 'medium', ?, ?)
-            `, [box.id, `周转箱 ${box.code} 装载数量超过容量`]);
+              INSERT INTO anomaly_records (anomaly_type, severity, box_id, operator_id, description)
+              VALUES ('box_overload', 'medium', ?, ?, ?)
+            `, [box.id, req.user.id, `周转箱 ${box.code} 装载数量超过容量`]);
           }
           throw new Error(`周转箱 ${box.code} 已装满`);
         }
@@ -464,7 +464,7 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   let sql = `
     SELECT ar.*, sm.code as mat_code, a.name as area_name, cb.code as batch_code,
       tb.code as box_code, u.name as resolved_name,
-      fu.name as follow_up_user_name, ru.name as reviewed_name
+      fu.name as follow_up_user_name, ru.name as reviewed_name, ou.name as operator_name
     FROM anomaly_records ar
     LEFT JOIN seat_mats sm ON ar.seat_mat_id = sm.id
     LEFT JOIN areas a ON ar.area_id = a.id
@@ -473,6 +473,7 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
     LEFT JOIN users u ON ar.resolved_by = u.id
     LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
     LEFT JOIN users ru ON ar.reviewed_by = ru.id
+    LEFT JOIN users ou ON ar.operator_id = ou.id
     WHERE 1=1
   `;
   const params = [];
@@ -494,7 +495,7 @@ app.get('/api/anomalies', authMiddleware, async (req, res) => {
   }
   if (batch_id) { sql += ' AND ar.batch_id = ?'; params.push(batch_id); }
   if (area_id) { sql += ' AND ar.area_id = ?'; params.push(area_id); }
-  if (operator_id) { sql += ' AND ar.reviewed_by = ?'; params.push(operator_id); }
+  if (operator_id) { sql += ' AND ar.operator_id = ?'; params.push(operator_id); }
   sql += ' ORDER BY ar.created_at DESC';
   const data = await all(sql, params);
   ok(res, data);
@@ -632,6 +633,7 @@ app.get('/api/export/:type', authMiddleware, roleMiddleware('auditor', 'admin'),
     data = await all(`
       SELECT ar.created_at as 创建时间, ar.anomaly_type as 异常类型, ar.severity as 严重程度, ar.description as 描述,
         sm.code as 座席垫编号, a.name as 区域, cb.code as 批次, tb.code as 周转箱,
+        ou.name as 操作人,
         CASE WHEN ar.resolved=1 THEN '已处理' ELSE '未处理' END as 状态,
         ar.resolved_remark as 处理备注,
         ar.review_cause as 异常原因, ar.review_link as 责任环节,
@@ -646,6 +648,7 @@ app.get('/api/export/:type', authMiddleware, roleMiddleware('auditor', 'admin'),
       LEFT JOIN turnover_boxes tb ON ar.box_id = tb.id
       LEFT JOIN users fu ON ar.follow_up_user_id = fu.id
       LEFT JOIN users ru ON ar.reviewed_by = ru.id
+      LEFT JOIN users ou ON ar.operator_id = ou.id
       ORDER BY ar.created_at DESC
     `);
     filename = '异常记录.xlsx';
